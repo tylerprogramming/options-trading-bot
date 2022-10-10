@@ -87,7 +87,7 @@ def generate():
     cw = csv.writer(si)
     cw.writerows(signals)
     output = make_response(si.getvalue())
-    output.headers["Content-Disposition"] = "attachment; filename=export.csv"
+    output.headers["Content-Disposition"] = "attachment; filename=report.csv"
     output.headers["Content-type"] = "text/csv"
 
     return output
