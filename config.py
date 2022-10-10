@@ -11,9 +11,8 @@ database_config = {
 
 redis_port = 6379
 localhost_port = 5002
-interactive_brokers_port = 7497
+interactive_brokers_port = 7496
 
 BALANCE = 2500
 RISK = .02
 NUMBER_OF_CONTRACTS = 1
-DELTA_CONSTANT_ADD_CONTRACT = 0.20
