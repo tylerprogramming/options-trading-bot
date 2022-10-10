@@ -1,4 +1,3 @@
-import datetime
 import time
 import numpy
 import asyncio
@@ -26,11 +25,11 @@ async def put_prices(correct_expiration, strikes_after_entry_price_call, strikes
     put_above_entry_price = [
         Option(symbol, correct_expiration, strike, right, constants.SMART, tradingClass=symbol)
         for right in ['P']
-        for strike in strikes_after_entry_price_call[:constants.NUMBER_OF_STRIKE_PRICES]]
+        for strike in strikes_after_entry_price_call[:config.NUMBER_OF_STRIKE_PRICES]]
     put_below_entry_price = [
         Option(symbol, correct_expiration, strike, right, constants.SMART, tradingClass=symbol)
         for right in ['P']
-        for strike in strikes_before_entry_price_call[-constants.NUMBER_OF_STRIKE_PRICES:]]
+        for strike in strikes_before_entry_price_call[-config.NUMBER_OF_STRIKE_PRICES:]]
 
     return put_above_entry_price, put_below_entry_price
 
@@ -38,11 +37,11 @@ async def call_prices(correct_expiration, strikes_after_entry_price_call, strike
     call_above_entry_price = [
         Option(symbol, correct_expiration, strike, right, constants.SMART, tradingClass=symbol)
         for right in ['C']
-        for strike in strikes_after_entry_price_call[:constants.NUMBER_OF_STRIKE_PRICES]]
+        for strike in strikes_after_entry_price_call[:config.NUMBER_OF_STRIKE_PRICES]]
     call_below_entry_price = [
         Option(symbol, correct_expiration, strike, right, constants.SMART, tradingClass=symbol)
         for right in ['C']
-        for strike in strikes_before_entry_price_call[-constants.NUMBER_OF_STRIKE_PRICES:]]
+        for strike in strikes_before_entry_price_call[-config.NUMBER_OF_STRIKE_PRICES:]]
 
     return call_above_entry_price, call_below_entry_price
 
@@ -79,12 +78,11 @@ class OptionsBot:
 
         # Redis connection
         self.r = redis.Redis(host='localhost', port=config.redis_port, db=0)
-        helper.log("Connected to Redis Server...")
+        helper.log("Connecting to Redis Server...")
 
         try:
             self.r.ping()
-            helper.log("Successfully Connected to Redis!")
-            helper.log(self.r.client())
+            helper.log("Successfully Connected to Redis")
         except redis.exceptions.ConnectionError as redis_conn_error:
             helper.log(str(redis_conn_error))
 
@@ -99,17 +97,19 @@ class OptionsBot:
             self.cursor.execute(tables.CREATE_OPTIONS_TABLE)
             self.cursor.execute(tables.CREATE_ACCOUNT_SUMMARY_TABLE)
             self.cnx.commit()
+            helper.log("Successfully Created Tables (if they didn't exist already) and Connected to MySQL")
         except mysql.connector.Error as err:
-            print("Failed creating table: {}".format(err))
+            helper.log(f"Failed creating table: {err}")
             exit(1)
-
-        print("Retrieving initial option chains...")
 
         try:
             self.ib = IB()
             self.ib.connect('127.0.0.1', config.interactive_brokers_port, clientId=1)
+            helper.log("Successfully Connected to Interactive Brokers")
         except Exception as e:
-            print(str(e))
+            helper.log(e)
+
+        helper.log("Retrieving initial option chains...")
 
         self.amazon_stock_contract = Stock(constants.AMAZON, constants.SMART, constants.USD)
         self.nvidia_stock_contract = Stock(constants.NVIDIA, constants.SMART, constants.USD)
@@ -129,7 +129,7 @@ class OptionsBot:
                                                               self.apple_stock_contract.secType,
                                                               self.apple_stock_contract.conId)
 
-        print("Running Live!")
+        helper.log("Running Live!")
 
         self.schedule = AsyncIOScheduler(daemon=True)
         self.schedule.add_job(self.update_options_chains, 'cron', day_of_week='mon-fri', hour='8')
@@ -173,7 +173,7 @@ class OptionsBot:
                                                   if strike > price]
                 strikes_before_entry_price_call = [strike for strike in options_chain.strikes
                                                    if strike < price]
-                expirations = sorted(exp for exp in options_chain.expirations)[:2]
+                expirations = sorted(iter(options_chain.expirations))[:2]
 
                 correct_expiration = helper.get_correct_options_expiration(expirations)
 
@@ -183,7 +183,7 @@ class OptionsBot:
                         call_contracts = numpy.concatenate((call_below_entry_price, call_above_entry_price))
                         valid_contracts = self.ib.qualifyContracts(*call_contracts)
 
-                        print("All valid contracts:", valid_contracts)
+                        helper.log(f"All valid contracts: {valid_contracts}")
 
                         if condition == "breakout":
                             self.breakout_amazon_call_options_contract = await self.get_correct_contract_with_delta(
@@ -303,7 +303,7 @@ class OptionsBot:
                                 self.sma_yellow_nvidia_call_options_contract
                             )
                         else:
-                            print("No condition with this name: {}".format(condition))
+                            print(f"No condition with this name: {condition}")
                     else:
                         put_above_entry_price, put_below_entry_price = await put_prices(correct_expiration,
                                                                                              strikes_after_entry_price_call,
@@ -514,15 +514,14 @@ class OptionsBot:
         """ Connect to MySQL database """
         if not self.cnx.is_connected() or not self.ib.client.isConnected():
             try:
-                print("Attempting Reconnection to MySQL Database...")
+                helper.log("Attempting Reconnection to MySQL Database...")
                 self.cnx.disconnect()
                 self.cnx = mysql.connector.connect(**config.database_config)
-                print("Reconnected to MySQL Database @",
-                      time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())))
+                helper.log("Reconnected to MySQL Database")
             except mysql.connector.Error as err:
                 print(err)
         else:
-            print("Still connected to MySQL Database!")
+            helper.log("Still connected to MySQL Database!")
 
     async def place_options_order(self, message_data, action, condition, contract):
         self.insert_option_contract(
@@ -563,16 +562,14 @@ class OptionsBot:
         contracts_from_buy_trade = 0
 
         if contract is None:
-            print("{} | Attempt 1: Didn't have contract stored in session to Sell".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+            helper.log("Attempt 1: Didn't have contract stored in session to Sell")
             retrieved_contract, number_of_contracts = self.check_for_options_contract(symbol, condition)
             print("Number of contracts is none:", number_of_contracts)
 
             if retrieved_contract is not None:
-                print("{} | Attempt 2: Found in database".format(
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
-                print("{} | Contract Found: {}".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
-                                                       retrieved_contract))
+                helper.log("Attempt 2: Found in database")
+                helper.log("Contract Found:")
+                helper.log(retrieved_contract)
                 found_in_database = True
                 contracts_from_buy_trade = number_of_contracts
                 contract = retrieved_contract
@@ -585,19 +582,19 @@ class OptionsBot:
                 if contracts_from_buy_trade == 0:
                     print("Couldn't find number of contracts in options database, can't sell contract:", contract)
                     return
-                print("contract found and not in data_base:", contracts_from_buy_trade)
+                helper.log("Contract found and didn't need to look at database")
+                helper.log(f"Number of contracts to sell retrieved from database: {contracts_from_buy_trade}")
 
             sell_market_order = MarketOrder(action, contracts_from_buy_trade)
             sell_trade = self.ib.placeOrder(contract, sell_market_order)
 
-            helper.log("Trade")
             helper.log(sell_trade)
             helper.log("Successfully Sold Trade!")
 
             ticker_data = self.ib.reqTickers(contract)
             model_greeks = ticker_data[0].modelGreeks
-            ticker_dataclass = helperclasses.TickerData(ticker_data[0].ask, ticker_data[0].bid, ticker_data[0].midpoint(),
-                model_greeks.delta, model_greeks.gamma, model_greeks.theta, model_greeks.impliedVol)
+            # ticker_dataclass = helperclasses.TickerData(ticker_data[0].ask, ticker_data[0].bid, ticker_data[0].midpoint(),
+            #     model_greeks.delta, model_greeks.gamma, model_greeks.theta, model_greeks.impliedVol)
 
             ask = ticker_data[0].ask
             bid = ticker_data[0].bid
@@ -607,7 +604,7 @@ class OptionsBot:
             theta = model_greeks.theta
             implied_vol = model_greeks.impliedVol
 
-            helper.log(ticker_dataclass.print())
+            # helper.log(ticker_dataclass.print())
 
             self.delete_options_contract(symbol, condition)
             self.update_data(result, condition, symbol, price, ask, bid, mid, delta, gamma, theta, implied_vol)
@@ -620,7 +617,7 @@ class OptionsBot:
         ticker_full_data = self.ib.reqTickers(*contracts)
         list(ticker_full_data)
 
-        print("ticker data", ticker_full_data)
+        helper.log(f"All Ticker Data for valid contracts: {ticker_full_data}")
 
         if ticker_full_data is not None:
             valid_deltas = []
@@ -628,60 +625,55 @@ class OptionsBot:
             all_deltas = [ticker.modelGreeks.delta for ticker in ticker_full_data]
 
             if ticker_full_data[0].modelGreeks.delta > 0:
-                for i in range(len(all_deltas)):
-                    if all_deltas[i] is not None:
-                        if constants.CALL_UPPER_DELTA_BOUNDARY > all_deltas[i] > constants.CALL_LOWER_DELTA_BOUNDARY:
-                            valid_deltas.append(all_deltas[i])
+                for all_delta in all_deltas:
+                    if all_delta is not None:
+                        if config.CALL_UPPER_DELTA_BOUNDARY > all_delta > config.CALL_LOWER_DELTA_BOUNDARY:
+                            valid_deltas.append(all_delta)
                         else:
-                            invalid_deltas.append(all_deltas[i])
+                            invalid_deltas.append(all_delta)
 
-                closest_ticker_index = max(range(len(ticker_full_data)),
-                                           key=lambda i: ticker_full_data[
-                                                             i].modelGreeks.delta < constants.CALL_UPPER_DELTA_BOUNDARY)
+                if valid_deltas:
+                    closest_ticker_index = max(range(len(valid_deltas)), key=lambda i: valid_deltas[i] < config.CALL_UPPER_DELTA_BOUNDARY)
+                else:
+                    helper.log(f"Couldn't find a Delta between specified boundaries {config.CALL_UPPER_DELTA_BOUNDARY} - {config.CALL_LOWER_DELTA_BOUNDARY}")
+                    return None
             else:
-                for i in range(len(all_deltas)):
-                    if all_deltas[i] is not None:
-                        if constants.PUT_UPPER_DELTA_BOUNDARY < all_deltas[i] < constants.PUT_LOWER_DELTA_BOUNDARY:
-                            valid_deltas.append(all_deltas[i])
+                for all_delta in all_deltas:
+                    if all_delta is not None:
+                        if config.PUT_UPPER_DELTA_BOUNDARY < all_delta < config.PUT_LOWER_DELTA_BOUNDARY:
+                            valid_deltas.append(all_delta)
                         else:
-                            invalid_deltas.append(all_deltas[i])
+                            invalid_deltas.append(all_delta)
 
-                closest_ticker_index = min(range(len(ticker_full_data)),
-                                           key=lambda i: ticker_full_data[
-                                                             i].modelGreeks.delta > constants.PUT_UPPER_DELTA_BOUNDARY)
+                if valid_deltas:
+                    closest_ticker_index = min(range(len(valid_deltas)), key=lambda i: valid_deltas[i] > config.PUT_UPPER_DELTA_BOUNDARY)
+                else:
+                    helper.log(f"Couldn't find a Delta between specified boundaries {config.PUT_UPPER_DELTA_BOUNDARY} - {config.PUT_LOWER_DELTA_BOUNDARY}")
+                    return None
 
-                if closest_ticker_index > 0:
-                    closest_ticker_index = closest_ticker_index - 1
-
-            print("{} | All Deltas:     {}".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
-                                                   all_deltas))
-            print("{} | Valid Deltas:   {}".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
-                                                   valid_deltas))
-            print("{} | Invalid Deltas: {}".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
-                                                   invalid_deltas))
-            print("{} | Chosen Index:   {}".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
-                                                   closest_ticker_index))
-            print("The delta:", ticker_full_data[closest_ticker_index].ask)
-            print("The mid:", ticker_full_data[closest_ticker_index].midpoint())
+            helper.log(f"All Deltas: {all_deltas}")
+            helper.log(f"Valid Deltas: {valid_deltas}")
+            helper.log(f"Invalid Deltas: {invalid_deltas}")
+            helper.log(f"Chosen Index: {closest_ticker_index}")
+            helper.log(f"The delta: {ticker_full_data[closest_ticker_index].modelGreeks.delta}")
+            helper.log(f"The bid: {ticker_full_data[closest_ticker_index].bid}")
             return ticker_full_data[closest_ticker_index].contract
         else:
-            print("There is no ticker data to retrieve...")
+            helper.log("There is no ticker data to retrieve...")
             return None
 
     async def get_correct_contract_with_delta(self, contracts):
         if len(contracts) == 0:
-            print("{} | No valid contracts to get the correct delta".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+            helper.log("No valid contracts to get the correct delta")
             return None
         else:
             chosen_options_contract = await self.ticker_info(contracts)
 
-            if chosen_options_contract is not None:
-                print("{} | The chosen contract with correct delta is: {}".format(
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())), chosen_options_contract))
-                return chosen_options_contract
-            else:
+            if chosen_options_contract is None:
                 return None
+            helper.log(f"The chosen contract with correct delta is: {chosen_options_contract}")
+
+            return chosen_options_contract
 
     def delete_options_contract(self, symbol, condition):
         sql_query = tables.DELETE_OPTION_DATA
@@ -692,9 +684,9 @@ class OptionsBot:
             cursor.execute(sql_query, sql_input)
             self.cnx.commit()
             cursor.close()
-            print("Successfully DELETED Option from table!")
+            helper.log("Successfully DELETED Option from table!")
         except mysql.connector.Error as err:
-            print("Failed deleting option from table: {}".format(err))
+            helper.log(f"Failed deleting option from table: {err}")
 
     def save_data(self, message_data, number_of_contracts, strike_price, ask, bid, mid, gamma, delta, theta, implied_vol):
         sql_query = tables.INSERT_TRADE_DATA
@@ -723,10 +715,9 @@ class OptionsBot:
             cursor.execute(sql_query, sql_input)
             self.cnx.commit()
             cursor.close()
-            print("{} | Successfully INSERTED Trade data into Database!".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+            helper.log("Successfully INSERTED Trade data into Database!")
         except mysql.connector.Error as err:
-            print("Failed saving data to signals table: {}".format(err))
+            helper.log(f"Failed saving data to signals table: {err}")
 
     def get_trade_contracts(self, symbol, condition):
         sqlite_insert_with_param = tables.GET_MATCHING_TRADE
@@ -741,13 +732,12 @@ class OptionsBot:
             cursor.execute(sqlite_insert_with_param, sqlite_data)
             number_of_contracts = cursor.fetchone()
         except mysql.connector.Error as err:
-            print("Failed getting number of trade contracts for {} - {}: {}".format(symbol, condition, err))
+            helper.log(f"Failed getting number of trade contracts for {symbol} - {condition}: {err}")
 
-        if number_of_contracts is not None:
-            print("Number of contracts found in Database: {}".format(number_of_contracts))
-            return number_of_contracts[0]
-        else:
+        if number_of_contracts is None:
             return 0
+        helper.log(f"Number of contracts found in Database: {number_of_contracts[0]}")
+        return number_of_contracts[0]
 
     def update_data(self, result, condition, symbol, sell_price, sell_ask, sell_bid, sell_mid, sell_delta, sell_gamma, sell_theta,
                     sell_implied_vol):
@@ -760,10 +750,10 @@ class OptionsBot:
             cursor.execute(sql_update_query, sql_input_data)
             self.cnx.commit()
             rows_affected = cursor.rowcount
-            print("Successfully UPDATED {} row(s) data into Database!".format(rows_affected))
+            helper.log(f"Successfully UPDATED {rows_affected} row(s) data into Database!")
             cursor.close()
         except mysql.connector.Error as err:
-            print("Failed updating data to database: {}".format(err))
+            helper.log(f"Failed updating data to database: {err}")
 
     def insert_option_contract(self, condition, contract, number_of_contracts):
         sqlite_insert_with_param = tables.INSERT_OPTION_DATA
@@ -783,13 +773,11 @@ class OptionsBot:
             cursor.execute(sqlite_insert_with_param, sqlite_data)
             self.cnx.commit()
             cursor.close()
-            print("{} | Successfully INSERTED Options data into Database!".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+            helper.log("Successfully INSERTED Options data into Database!")
         except mysql.connector.Error as err:
-            print("{} | Failed INSERTING options data into database: {}".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())), err))
+            helper.log(f"Failed INSERTING options data into database: {err}")
 
-    def sell_remaining_contracts_end_of_day(self):
+    async def sell_remaining_contracts_end_of_day(self):
         sql_query = tables.RETRIEVE_OPTION_ALL_REMAINING_CONTRACTS
 
         try:
@@ -797,10 +785,9 @@ class OptionsBot:
             cursor.execute(sql_query)
             rows = cursor.fetchall()
         except mysql.connector.Error as err:
-            print("{} | Failed RETRIEVING remaining Option Contract(s) from Database: {}".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())), err))
+            helper.log(f"Failed RETRIEVING remaining Option Contract(s) from Database: {err}")
 
-        print(rows)
+        helper.log(rows)
 
         if rows:
             for row in rows:
@@ -831,10 +818,8 @@ class OptionsBot:
                 sell_market_order = MarketOrder(constants.SELL, number_of_contracts)
                 sell_trade = self.ib.placeOrder(contract, sell_market_order)
 
-                print("{} | Trade: {}".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())),
-                                              sell_trade))
-                print("{} | Successfully Sold Trade".format(
-                    time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+                helper.log(f"Trade: {sell_trade}")
+                helper.log("Successfully Sold Trade")
 
                 try:
                     sql_query_ask = tables.RETRIEVE_TRADE_ASK_PRICE
@@ -845,24 +830,17 @@ class OptionsBot:
                     trade_right = row[0]
                     trade_ask_price = row[1]
                 except mysql.connector.Error as err:
-                    print("Failed RETRIEVING reminaining Option Contract(s) from Database: {}".format(err))
+                    helper.log(f"Failed RETRIEVING remaining Option Contract(s) from Database: {err}")
 
-                if trade_right == constants.CALL:
-                    if trade_ask_price > ask:
-                        result = "L"
-                    else:
-                        result = "W"
+                if trade_right == constants.CALL and trade_ask_price > ask or trade_right != constants.CALL and trade_ask_price <= ask:
+                    result = "L"
                 else:
-                    if trade_ask_price > ask:
-                        result = "W"
-                    else:
-                        result = "L"
+                    result = "W"
 
                 self.delete_options_contract(options_symbol, options_condition)
                 self.update_data(result, options_condition, options_symbol, 100.0, ask, bid, mid, delta, gamma, theta, implied_vol)
         else:
-            print("{} | No Contracts to Sell at the end of the day".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+            helper.log("No Contracts to Sell at the end of the day")
 
     def check_for_options_contract(self, symbol, condition):
         sql_query = tables.RETRIEVE_OPTION_CONTRACT
@@ -873,8 +851,7 @@ class OptionsBot:
             cursor.execute(sql_query, sql_input)
             row = cursor.fetchone()
         except mysql.connector.Error as err:
-            print("{} | Failed RETRIEVING Options Contract from Database: {}".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())), err))
+            helper.log(f"Failed RETRIEVING Options Contract from Database: {err}")
 
         if row:
             options_symbol = row[0]
@@ -886,8 +863,7 @@ class OptionsBot:
             found_contract = helper.create_options_contract(options_symbol, options_expiration, options_strike, options_right)
             self.ib.qualifyContracts(found_contract)
         else:
-            print("{} | No contract found in database".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+            helper.log("No contract found in database")
             return None, None
 
         return found_contract, number_of_contracts
@@ -897,12 +873,11 @@ class OptionsBot:
         Check IB Connection
         """
         if not self.ib.isConnected() or not self.ib.client.isConnected():
-            print("Attempting Reconnection to Interactive Brokers...")
+            helper.log("Attempting Reconnection to Interactive Brokers...")
             self.ib.disconnect()
             self.ib = IB()
             self.ib.connect('127.0.0.1', config.interactive_brokers_port, clientId=1)
-            print("{} | Reconnected to Interactive Brokers".format(
-                time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+            helper.log("Reconnected to Interactive Brokers")
 
     async def update_options_chains(self):
         """
@@ -912,7 +887,7 @@ class OptionsBot:
 
         try:
             self.schedule.print_jobs()
-            print("{} | Updating Option Chains".format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time()))))
+            helper.log("Updating Option Chains")
             self.amazon_option_chains = self.ib.reqSecDefOptParams(
                 self.amazon_stock_contract.symbol, '',
                 self.amazon_stock_contract.secType,
@@ -926,7 +901,7 @@ class OptionsBot:
                 self.apple_stock_contract.secType,
                 self.apple_stock_contract.conId)
         except Exception as e:
-            print(str(e))
+            print(e)
 
 
 # start the options bot
