@@ -13,6 +13,7 @@ CREATE_TRADE_TABLE = """
         trade_right         VARCHAR(4) NOT NULL,
         contracts           INT NOT NULL,
         entryprice          DECIMAL(10, 3),
+        sell_price          DECIMAL(10, 3) DEFAULT 0.00,
         strikeprice         VARCHAR(10) NOT NULL,
         stoploss            DECIMAL(10, 3),
         take_profit         DECIMAL(10, 3),
@@ -21,12 +22,14 @@ CREATE_TRADE_TABLE = """
         buy_theta           DECIMAL(10, 3),
         buy_ask             DECIMAL(10, 3),
         buy_bid             DECIMAL(10, 3),
+        buy_mid             DECIMAL(10, 3),
         buy_implied_vol     DECIMAL(10, 3),
         sell_delta          DECIMAL(10, 3) DEFAULT 0.00,
         sell_gamma          DECIMAL(10, 3) DEFAULT 0.00,
         sell_theta          DECIMAL(10, 3) DEFAULT 0.00,
         sell_ask            DECIMAL(10, 3) DEFAULT 0.00,
         sell_bid            DECIMAL(10, 3) DEFAULT 0.00,
+        sell_mid            DECIMAL(10, 3) DEFAULT 0.00,
         sell_implied_vol    DECIMAL(10, 3) DEFAULT 0.00,    
         result              CHAR(1) NOT NULL,
         buy_timestamp       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -77,21 +80,24 @@ INSERT_TRADE_DATA = """
             buy_theta,
             buy_ask,
             buy_bid,
+            buy_mid,
             buy_implied_vol,
             result
         ) 
-    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+    VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
 """
 
 UPDATE_TRADE_DATA = """
     UPDATE trade 
     SET 
-        result = %s, 
+        result = %s,
+        sell_price = %s, 
         sell_delta = %s, 
         sell_gamma = %s,
         sell_theta = %s, 
         sell_ask = %s,
-        sell_bid = %s, 
+        sell_bid = %s,
+        sell_mid = %s, 
         sell_implied_vol = %s, 
         sell_timestamp = CURRENT_TIMESTAMP
     WHERE 
@@ -103,7 +109,7 @@ UPDATE_TRADE_DATA = """
 
 DELETE_ALL_TRADE_DATA = """DELETE FROM trade"""
 
-RETRIEVE_TRADE_ASK_PRICE = """SELECT trade_right, buy_ask FROM trade WHERE symbol = %s and trade_condition = %s and result = 'P' LIMIT 1"""
+RETRIEVE_TRADE_ASK_PRICE = """SELECT trade_right, buy_mid FROM trade WHERE symbol = %s and trade_condition = %s and result = 'P' LIMIT 1"""
 RETRIEVE_TRADE_DATA_TODAY = """SELECT * FROM trade WHERE DATE(buy_timestamp) = CURDATE()"""
 RETRIEVE_TRADE_DATA_YESTERDAY = """
     SELECT * FROM trade WHERE buy_timestamp > DATE_SUB(CURRENT_DATE, INTERVAL 1 DAY) and DATE(buy_timestamp) < CURDATE()
@@ -179,16 +185,23 @@ EXPORT_DAILY_CSV = """
         'trade_right',
         'contracts',
         'entryprice',
+        'sell_price',
         'strikeprice',
         'stoploss',
         'take_profit',
         'buy_delta',
         'buy_gamma',
+        'buy_theta',
         'buy_ask',
+        'buy_bid',
+        'buy_mid',
         'buy_implied_vol',
         'sell_delta',
         'sell_gamma',
+        'sell_theta',
         'sell_ask',
+        'sell_bid',
+        'sell_mid',
         'sell_implied_vol',
         'result',
         'buy_timestamp',
